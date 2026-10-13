@@ -1,0 +1,190 @@
+// =============================================================================
+// LiFi_Tx.v  -  EDGE Artix-7 LiFi Transmitter
+// =============================================================================
+
+module LiFi_Tx(
+    input      clk,
+    input      pb0,           // K13 - press -> send "VIT"
+    input      pb1,           // L14 - press -> send Sargam
+    output reg tx_led,        // T14 - to external LED via 100Ω
+    output     led_status     // J3  - onboard LED mirrors tx_led
+);
+
+// ---------------------------------------------------------------------------
+// 1. Baud tick  - SLOWED TO 4 BPS to prevent LDR optical smearing
+// ---------------------------------------------------------------------------
+localparam CLK_FREQ  = 50_000_000;
+localparam BAUD_RATE = 4;
+localparam BAUD_TICK = CLK_FREQ / BAUD_RATE;   // 12,500,000
+
+reg [24:0] timer = 0; // EXPANDED to 25-bit to prevent overflow at slow speeds
+reg        tick  = 0;
+
+always @(posedge clk) begin
+    if (timer == BAUD_TICK - 1) begin
+        timer <= 0;
+        tick  <= 1;
+    end else begin
+        timer <= timer + 1;
+        tick  <= 0;
+    end
+end
+
+// ---------------------------------------------------------------------------
+// 2. Debounce + sticky pending flags
+// ---------------------------------------------------------------------------
+localparam DB_TICKS = 1_000_000;   // 20 ms at 50 MHz
+
+reg [19:0] db0 = 0, db1 = 0;
+reg        pb0_d = 0, pb1_d = 0;   
+
+reg pending_text  = 0;
+reg pending_audio = 0;
+
+wire consumed;   
+
+always @(posedge clk) begin
+    pb0_d <= pb0;
+    pb1_d <= pb1;
+
+    if (!pb0) db0 <= 0;                   
+    else if (db0 < DB_TICKS - 1) db0 <= db0 + 1;             
+    
+    if (!pb1) db1 <= 0;
+    else if (db1 < DB_TICKS - 1) db1 <= db1 + 1;
+
+    if (db0 == DB_TICKS - 2 && pb0) pending_text <= 1;
+    if (db1 == DB_TICKS - 2 && pb1) pending_audio <= 1;
+
+    if (consumed) begin
+        pending_text  <= 0;
+        pending_audio <= 0;
+    end
+end
+
+// ---------------------------------------------------------------------------
+// 3. ROM
+// ---------------------------------------------------------------------------
+reg [7:0] text_rom  [0:2];
+reg [7:0] audio_rom [0:7];
+
+initial begin
+    text_rom[0] = 8'h56;  // V
+    text_rom[1] = 8'h49;  // I
+    text_rom[2] = 8'h54;  // T
+
+    audio_rom[0] = 8'd1;  
+    audio_rom[1] = 8'd2;  
+    audio_rom[2] = 8'd3;  
+    audio_rom[3] = 8'd4;  
+    audio_rom[4] = 8'd5;  
+    audio_rom[5] = 8'd6;  
+    audio_rom[6] = 8'd7;  
+    audio_rom[7] = 8'd8;  
+end
+
+// ---------------------------------------------------------------------------
+// 4. UART TX FSM
+// ---------------------------------------------------------------------------
+localparam S_IDLE      = 4'd0;
+localparam S_PRE_START = 4'd1;
+localparam S_PRE_DATA  = 4'd2;
+localparam S_PRE_STOP  = 4'd3;
+localparam S_HDR_START = 4'd4;
+localparam S_HDR_DATA  = 4'd5;
+localparam S_HDR_STOP  = 4'd6;
+localparam S_DAT_START = 4'd7;
+localparam S_DAT_DATA  = 4'd8;
+localparam S_DAT_STOP  = 4'd9;
+
+reg [3:0] state       = S_IDLE;
+reg       mode_lat    = 0;
+reg [1:0] pre_cnt     = 0;
+reg [3:0] char_idx    = 0;
+reg [2:0] bit_idx     = 0;
+reg [7:0] shifter     = 0;
+reg [3:0] total_chars = 0;
+
+assign consumed = tick && (state == S_IDLE) && (pending_text || pending_audio);
+
+always @(posedge clk) begin
+    if (tick) begin
+        case (state)
+            S_IDLE: begin
+                tx_led <= 0;
+                if (pending_text || pending_audio) begin
+                    mode_lat    <= pending_audio;
+                    total_chars <= pending_audio ? 4'd8 : 4'd3;
+                    pre_cnt     <= 0;
+                    shifter     <= 8'h55;
+                    state       <= S_PRE_START;
+                end
+            end
+            S_PRE_START: begin
+                tx_led  <= 1;    
+                bit_idx <= 0;
+                state   <= S_PRE_DATA;
+            end
+            S_PRE_DATA: begin
+                tx_led  <= shifter[0];
+                shifter <= {1'b0, shifter[7:1]};
+                if (bit_idx == 7) state <= S_PRE_STOP;
+                else bit_idx <= bit_idx + 1;
+            end
+            S_PRE_STOP: begin
+                tx_led <= 0;    
+                if (pre_cnt == 2) begin
+                    shifter <= mode_lat ? 8'hBB : 8'hAA;
+                    state   <= S_HDR_START;
+                end else begin
+                    pre_cnt <= pre_cnt + 1;
+                    shifter <= 8'h55;
+                    state   <= S_PRE_START;
+                end
+            end
+            S_HDR_START: begin
+                tx_led  <= 1;
+                bit_idx <= 0;
+                state   <= S_HDR_DATA;
+            end
+            S_HDR_DATA: begin
+                tx_led  <= shifter[0];
+                shifter <= {1'b0, shifter[7:1]};
+                if (bit_idx == 7) state <= S_HDR_STOP;
+                else bit_idx <= bit_idx + 1;
+            end
+            S_HDR_STOP: begin
+                tx_led   <= 0;
+                char_idx <= 0;
+                shifter  <= mode_lat ? audio_rom[0] : text_rom[0];
+                state    <= S_DAT_START;
+            end
+            S_DAT_START: begin
+                tx_led  <= 1;
+                bit_idx <= 0;
+                state   <= S_DAT_DATA;
+            end
+            S_DAT_DATA: begin
+                tx_led  <= shifter[0];
+                shifter <= {1'b0, shifter[7:1]};
+                if (bit_idx == 7) state <= S_DAT_STOP;
+                else bit_idx <= bit_idx + 1;
+            end
+            S_DAT_STOP: begin
+                tx_led <= 0;
+                if (char_idx == total_chars - 1) begin
+                    state <= S_IDLE;
+                end else begin
+                    char_idx <= char_idx + 1;
+                    shifter  <= mode_lat ? audio_rom[char_idx + 1] : text_rom [char_idx + 1];
+                    state    <= S_DAT_START;
+                end
+            end
+            default: state <= S_IDLE;
+        endcase
+    end
+end
+
+assign led_status = tx_led;
+
+endmodule
