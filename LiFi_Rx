@@ -1,0 +1,220 @@
+// =============================================================================
+// LiFi_Rx.v  -  EDGE Artix-7  (FIXED ACTIVE-HIGH ANODES)
+// =============================================================================
+
+module LiFi_Rx(
+    input        clk,
+    input        vauxp15,
+    input        vauxn15,
+    output reg   buzzer,
+    output [7:0] seg_data,
+    output [3:0] seg_an,
+    output       led_mode,
+    output [3:0] led_dbg
+);
+
+// 1. XADC
+wire [15:0] adc_data;
+wire        drdy, eoc;
+
+XADC #(
+    .INIT_40(16'h0000), .INIT_41(16'h210F), .INIT_42(16'h0400),
+    .INIT_48(16'h0000), .INIT_49(16'h8000), .SIM_DEVICE("7SERIES")
+) XADC_INST (
+    .DO(adc_data), .DRDY(drdy), .EOC(eoc), .EOS(),
+    .DADDR(7'h1F), .DEN(eoc), .DWE(1'b0), .DI(16'h0),
+    .DCLK(clk), .RESET(1'b0), .CONVST(1'b0), .CONVSTCLK(1'b0),
+    .VP(1'b0), .VN(1'b0),
+    .VAUXP({vauxp15,15'b0}), .VAUXN({vauxn15,15'b0})
+);
+
+localparam HIGH_THRESH = 12'd1000;
+localparam LOW_THRESH  = 12'd800;  
+reg ldr_digital = 0;
+always @(posedge clk) begin
+    if (drdy) begin
+        if      (adc_data[15:4] > HIGH_THRESH) ldr_digital <= 1;
+        else if (adc_data[15:4] < LOW_THRESH)  ldr_digital <= 0;
+    end
+end
+
+// 2. UART Receiver (4 BPS to match Transmitter)
+localparam CLK_FREQ  = 50_000_000;
+localparam BAUD_RATE = 4; 
+localparam BIT_TICKS = CLK_FREQ / BAUD_RATE;
+localparam HALF_BIT  = BIT_TICKS / 2;
+
+reg [24:0] rx_tick=0;
+reg [3:0]  rx_bit=0;
+reg [7:0]  rx_shift=0, rx_data=0;
+reg        rx_valid=0, ldr_prev=0;
+
+localparam RX_IDLE=2'd0, RX_START=2'd1, RX_DATA=2'd2, RX_STOP=2'd3;
+reg [1:0] rx_state=RX_IDLE;
+
+always @(posedge clk) begin
+    rx_valid<=0; ldr_prev<=ldr_digital;
+    case (rx_state)
+        RX_IDLE: begin
+            rx_tick<=0;
+            if (ldr_digital && !ldr_prev) begin rx_bit<=0; rx_state<=RX_START; end
+        end
+        RX_START: begin
+            rx_tick<=rx_tick+1;
+            if (rx_tick==BIT_TICKS+HALF_BIT-1) begin
+                rx_tick<=0; rx_shift[0]<=ldr_digital; rx_bit<=1; rx_state<=RX_DATA;
+            end
+        end
+        RX_DATA: begin
+            rx_tick<=rx_tick+1;
+            if (rx_tick==BIT_TICKS-1) begin
+                rx_tick<=0; rx_shift[rx_bit]<=ldr_digital;
+                if (rx_bit==7) rx_state<=RX_STOP; else rx_bit<=rx_bit+1;
+            end
+        end
+        RX_STOP: begin
+            rx_tick<=rx_tick+1;
+            if (rx_tick==BIT_TICKS-1) begin
+                rx_tick<=0; rx_data<=rx_shift; rx_valid<=1; rx_state<=RX_IDLE;
+            end
+        end
+    endcase
+end
+
+// 3. Protocol decoder
+localparam SYNC_HUNT=2'd0, SYNC_HEADER=2'd1, SYNC_DATA=2'd2;
+reg [1:0] sync_state=SYNC_HUNT;
+reg [2:0] pre_count=0, char_count=0;    
+reg       mode=0, rx_visible_toggle=0, fifo_push=0;
+reg [7:0] b0=8'h20, b1=8'h20, b2=8'h20;
+
+reg [7:0] disp_buf [0:3];
+initial begin
+    disp_buf[0] = 8'h20;
+    disp_buf[1] = 8'h20;
+    disp_buf[2] = 8'h20;
+    disp_buf[3] = 8'h20;
+end
+
+reg [3:0] fifo[0:3];
+reg [1:0] fifo_head=0, fifo_tail=0;
+reg [2:0] fifo_count=0;
+reg [3:0] fifo_push_val=0;
+
+always @(posedge clk) begin
+    fifo_push <= 0;
+    if (rx_valid) rx_visible_toggle <= ~rx_visible_toggle;
+
+    if (rx_valid) begin
+        case (sync_state)
+            SYNC_HUNT: begin
+                if (rx_data==8'h55) begin
+                    if (pre_count==2) begin pre_count <= 0; sync_state <= SYNC_HEADER; end 
+                    else pre_count <= pre_count+1;
+                end else pre_count <= 0;
+            end
+            SYNC_HEADER: begin
+                pre_count<=0; char_count<=0; b0<=8'h20; b1<=8'h20; b2<=8'h20;
+                if (rx_data==8'hAA) begin mode<=0; sync_state<=SYNC_DATA; end 
+                else if (rx_data==8'hBB) begin mode<=1; sync_state<=SYNC_DATA; end 
+                else sync_state<=SYNC_HUNT;
+            end
+            SYNC_DATA: begin
+                if (mode==0) begin
+                    b2<=b1; b1<=b0; b0<=rx_data;
+                    if (char_count==2) begin
+                        disp_buf[0] <= b1;       // V -> AN0
+                        disp_buf[1] <= b0;       // I -> AN1
+                        disp_buf[2] <= rx_data;  // t -> AN2
+                        disp_buf[3] <= 8'h20;    // Blank -> AN3
+                        char_count <= 0; sync_state <= SYNC_HUNT; 
+                    end else char_count <= char_count+1;
+                end else begin
+                    if (fifo_count<4) begin fifo_push <= 1; fifo_push_val <= rx_data[3:0]; end
+                    if (char_count==7) begin char_count<=0; sync_state<=SYNC_HUNT; end 
+                    else char_count<=char_count+1;
+                end
+            end
+            default: begin sync_state<=SYNC_HUNT; pre_count<=0; char_count<=0; end
+        endcase
+    end
+end
+
+// 4. Audio engine 
+function [16:0] half_per;
+    input [3:0] idx;
+    case (idx)
+        4'd1: half_per=17'd95785; 4'd2: half_per=17'd85034;
+        4'd3: half_per=17'd75758; 4'd4: half_per=17'd71633;
+        4'd5: half_per=17'd63776; 4'd6: half_per=17'd56818;
+        4'd7: half_per=17'd50607; 4'd8: half_per=17'd47801;
+        default: half_per=17'd0;
+    endcase
+endfunction
+
+localparam NOTE_DUR=25_000_000;
+reg [24:0] note_dur_cnt=0;
+reg [16:0] buzz_cnt=0;
+reg [3:0]  play_idx=0;
+reg        note_playing=0;
+
+always @(posedge clk) begin
+    if (fifo_push) begin
+        fifo[fifo_tail]<=fifo_push_val; fifo_tail<=fifo_tail+1; fifo_count<=fifo_count+1;
+    end
+    if (!note_playing && fifo_count>0 && !fifo_push) begin
+        play_idx<=fifo[fifo_head]; fifo_head<=fifo_head+1;
+        fifo_count<=fifo_count-1; note_playing<=1; note_dur_cnt<=0; buzz_cnt<=0;
+    end
+    if (note_playing) begin
+        note_dur_cnt<=note_dur_cnt+1;
+        if (note_dur_cnt>=NOTE_DUR-1) begin note_playing<=0; buzzer<=0; end
+        else begin
+            buzz_cnt<=buzz_cnt+1;
+            if (buzz_cnt>=half_per(play_idx)) begin buzz_cnt<=0; buzzer<=~buzzer; end
+        end
+    end else buzzer<=0;
+end
+
+// 5. 7-segment display
+localparam SEG_DIV=12_500;
+reg [13:0] seg_cnt=0;
+reg [1:0]  seg_digit=0;
+always @(posedge clk) begin
+    if (seg_cnt==SEG_DIV-1) begin seg_cnt<=0; seg_digit<=seg_digit+1; end
+    else seg_cnt<=seg_cnt+1;
+end
+
+// FIX: Active-High Anode mapping verified by your screenshot[cite: 2]
+reg [3:0] anode_reg;
+always @(*) begin
+    case (seg_digit)
+        2'd0: anode_reg = 4'b0001; // AN0 ON (Leftmost)[cite: 2]
+        2'd1: anode_reg = 4'b0010; // AN1 ON (Middle-Left)[cite: 2]
+        2'd2: anode_reg = 4'b0100; // AN2 ON (Middle-Right)[cite: 2]
+        2'd3: anode_reg = 4'b1000; // AN3 ON (Rightmost) 
+    endcase
+end
+assign seg_an=anode_reg;
+
+function [7:0] a2seg;
+    input [7:0] ch;
+    case (ch)
+        8'h56, 8'h76: a2seg = 8'b10000011; // 'V' 
+        8'h49, 8'h69: a2seg = 8'b10011111; // 'I' 
+        8'h54, 8'h74: a2seg = 8'b11100001; // 't' 
+        8'h20:        a2seg = 8'b11111111; // Space (Blank)
+        default:      a2seg = 8'b11111111; 
+    endcase
+endfunction
+
+assign seg_data = a2seg(disp_buf[seg_digit]);
+
+// 6. Status outputs
+assign led_mode   = mode;
+assign led_dbg[0] = ldr_digital;               
+assign led_dbg[1] = (sync_state!=SYNC_HUNT);   
+assign led_dbg[2] = note_playing;              
+assign led_dbg[3] = rx_visible_toggle;         
+
+endmodule
