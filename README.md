@@ -5,6 +5,7 @@
 [![HDL](https://img.shields.io/badge/Language-Verilog%20HDL-green.svg)]()
 [![Analog Subsystem](https://img.shields.io/badge/ADC-Xilinx%20XADC%20(12--bit)-purple.svg)]()
 [![Modulation](https://img.shields.io/badge/Modulation-OOK%20Optical%20UART-orange.svg)]()
+[![Department](https://img.shields.io/badge/Department-EXTC%20Engineering-blue.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
 
 A complete, bare-metal **Optical Wireless Communication (OWC / Li-Fi)** digital transceiver system implemented in synthesizable **Verilog HDL** on the **AMD Xilinx Edge Artix-7 FPGA (XC7A35T)**.
@@ -13,7 +14,40 @@ The system transmits digital data wirelessly over free-space visible light using
 
 ---
 
-## 1. System Architecture Overview
+## 1. Physical Hardware Demonstration (Edge Artix-7 FPGA)
+
+<table align="center">
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/transmitter_board_hardware.png" width="95%" alt="Transmitter Board - Edge Artix-7" /><br/><br/>
+      <b>TRANSMITTER BOARD (EDGE ARTIX-7)</b><br/>
+      <sub><b>Optical Source:</b> High-Brightness White LED (Pin <code>M16</code>)<br/><b>Control:</b> Pushbutton <code>PB0</code> ("VIT") / <code>PB1</code> (Sargam Notes)</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/receiver_board_hardware.png" width="95%" alt="Receiver Board - Edge Artix-7" /><br/><br/>
+      <b>RECEIVER BOARD (EDGE ARTIX-7)</b><br/>
+      <sub><b>Optical Sensing:</b> 7-Series XADC (Pins <code>E2/D1</code>)<br/><b>Output:</b> 7-Segment Display <code>VIt </code> + Piezo Buzzer <code>K12</code></sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/assets/hardware_in_action_full.png" width="100%" alt="Hardware In Action - Edge Artix-7 LiFi Transceiver" /><br/>
+  <em>Figure 1: Complete end-to-end physical hardware demonstration on two Edge Artix-7 FPGA boards. (Left) Transmitter board streaming modulated visible light pulses. (Right) Receiver board displaying decoded ASCII text ("VIt") on the 7-segment display.</em>
+</p>
+
+---
+
+## 2. Project Presentation Poster
+
+<p align="center">
+  <img src="docs/assets/lifi_project_poster.png" width="85%" alt="LiFi Mini Project Poster - Vidyalankar Institute of Technology" /><br/>
+  <em>Figure 2: Official academic project poster presented at Vidyalankar Institute of Technology (VIT Mumbai), Department of Electronics & Telecommunication Engineering (EXTC).</em>
+</p>
+
+---
+
+## 3. System Architecture Overview
 
 ```mermaid
 graph TD
@@ -41,7 +75,7 @@ graph TD
 
 ---
 
-## 2. Key Engineering Innovations & Features
+## 4. Key Engineering Innovations & Features
 
 ### A. Optical Smearing Mitigation (4 BPS Calibrated Timing)
 Standard photoresistors (LDRs) suffer from slow chemical response rise and fall times ($\approx 10\text{--}50\text{ ms}$). To achieve $100\%$ zero-bit-error optical transmission without expensive high-speed photodiode amplification circuits, the serial transmission tick was calibrated to **4 BPS** ($12,500,000\text{ clock cycles at 50 MHz}$).
@@ -62,7 +96,7 @@ Every transmitted optical burst is encapsulated within a robust packet frame:
 
 ---
 
-## 3. Operational Modes
+## 5. Operational Modes
 
 ### Mode 0: Alphanumeric Text Transmission
 * **Trigger:** Pressing pushbutton `PB0` (`K13`).
@@ -87,7 +121,7 @@ Every transmitted optical burst is encapsulated within a robust packet frame:
 
 ---
 
-## 4. Hardware Peripheral Pinout Specifications
+## 6. Hardware Peripheral Pinout Specifications
 
 ### Transmitter Board (`Lifi Transmitter Constraint`)
 | Port Signal | FPGA Pin | I/O Standard | Description |
@@ -115,7 +149,7 @@ Every transmitted optical burst is encapsulated within a robust packet frame:
 
 ---
 
-## 5. Synthesis & Implementation in Vivado
+## 7. Synthesis & Implementation in Vivado
 
 ### Building the Transmitter
 1. Create a Vivado project targeting `xc7a35tftg256-1`.
@@ -131,8 +165,9 @@ Every transmitted optical burst is encapsulated within a robust packet frame:
 
 ---
 
-## Author & Acknowledgments
+## Author & Academic Affiliation
 
 * **Author:** Pooja Pramod Nagvekar
-* **Affiliation:** Vidyalankar Institute of Technology (VIT Mumbai)
+* **Department:** Electronics & Telecommunication Engineering (EXTC)
+* **Institution:** Vidyalankar Institute of Technology (VIT Mumbai), Accredited A+ by NAAC
 * **License:** This project is open-source under the [MIT License](LICENSE).
