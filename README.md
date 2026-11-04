@@ -32,22 +32,12 @@ The system transmits digital data wirelessly over free-space visible light using
 </table>
 
 <p align="center">
-  <img src="docs/assets/hardware_in_action_full.png" width="100%" alt="Hardware In Action - Edge Artix-7 LiFi Transceiver" /><br/>
-  <em>Figure 1: Complete end-to-end physical hardware demonstration on two Edge Artix-7 FPGA boards. (Left) Transmitter board streaming modulated visible light pulses. (Right) Receiver board displaying decoded ASCII text ("VIt") on the 7-segment display.</em>
+  <em>Figure 1: Live physical hardware verification across two Edge Artix-7 FPGA development boards. (Left) Transmitter streaming modulated visible light pulses. (Right) Receiver digitizing optical transitions and displaying decoded ASCII text ("VIt") on the 7-segment display.</em>
 </p>
 
 ---
 
-## 2. Project Presentation Poster
-
-<p align="center">
-  <img src="docs/assets/lifi_project_poster.png" width="85%" alt="LiFi Mini Project Poster - Vidyalankar Institute of Technology" /><br/>
-  <em>Figure 2: Official academic project poster presented at Vidyalankar Institute of Technology (VIT Mumbai), Department of Electronics & Telecommunication Engineering (EXTC).</em>
-</p>
-
----
-
-## 3. System Architecture Overview
+## 2. System Architecture Overview
 
 ```mermaid
 graph TD
@@ -75,7 +65,7 @@ graph TD
 
 ---
 
-## 4. Key Engineering Innovations & Features
+## 3. Key Engineering Innovations & Features
 
 ### A. Optical Smearing Mitigation (4 BPS Calibrated Timing)
 Standard photoresistors (LDRs) suffer from slow chemical response rise and fall times ($\approx 10\text{--}50\text{ ms}$). To achieve $100\%$ zero-bit-error optical transmission without expensive high-speed photodiode amplification circuits, the serial transmission tick was calibrated to **4 BPS** ($12,500,000\text{ clock cycles at 50 MHz}$).
@@ -96,7 +86,7 @@ Every transmitted optical burst is encapsulated within a robust packet frame:
 
 ---
 
-## 5. Operational Modes
+## 4. Operational Modes
 
 ### Mode 0: Alphanumeric Text Transmission
 * **Trigger:** Pressing pushbutton `PB0` (`K13`).
@@ -121,7 +111,7 @@ Every transmitted optical burst is encapsulated within a robust packet frame:
 
 ---
 
-## 6. Hardware Peripheral Pinout Specifications
+## 5. Hardware Peripheral Pinout Specifications
 
 ### Transmitter Board (`Lifi Transmitter Constraint`)
 | Port Signal | FPGA Pin | I/O Standard | Description |
@@ -149,7 +139,7 @@ Every transmitted optical burst is encapsulated within a robust packet frame:
 
 ---
 
-## 7. Synthesis & Implementation in Vivado
+## 6. Synthesis & Implementation in Vivado
 
 ### Building the Transmitter
 1. Create a Vivado project targeting `xc7a35tftg256-1`.
